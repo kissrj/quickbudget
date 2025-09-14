@@ -5,17 +5,29 @@ import 'package:hive/hive.dart';
 part 'constants.g.dart';
 
 class AppConstants {
-  // Colors
-  static const Color primaryColor = Color(0xFF00509E);
-  static const Color positiveColor = Color(0xFF007A33); // Green for income
+  // Google Stitch Design Colors
+  static const Color backgroundColor = Color(0xFF122118); // Fundo escuro
+  static const Color primaryColor = Color(0xFF38E07B); // Verde brilhante
+  static const Color secondaryBackground = Color(
+    0xFF1B3124,
+  ); // Fundo secundário
+  static const Color borderColor = Color(0xFF264532); // Cor da borda
+  static const Color textColor = Color(0xFFFFFFFF); // Texto branco
+  static const Color textSecondary = Color(
+    0xCCFFFFFF,
+  ); // Texto secundário (80% opacidade)
+  static const Color iconActive = Color(0xFF96C5A9); // Ícone ativo
+  static const Color shadowColor = Color(0xFF38E07B); // Cor da sombra
+
+  // Legacy colors for compatibility
+  static const Color positiveColor = Color(0xFF38E07B); // Green for income
   static const Color expenseColor = Color(0xFF00509E); // Blue for expenses
   static const Color alertColor = Color(0xFFD62828);
   static const Color lightGray = Color(0xFFF5F7FA);
-  static const Color textColor = Color(0xFF1A1A1A);
   static const Color whiteColor = Color(0xFFFFFFFF);
 
   // App settings
-  static const appName = 'QuickBudget';
+  static const appName = 'Controle Financeiro';
   static const freePlanLimit = 10;
 
   // Premium price

@@ -6,6 +6,7 @@ import '../services/voice_input_service.dart';
 import '../utils/constants.dart';
 import '../main.dart'; // Import for transactionServiceProvider
 import 'home_screen.dart'; // Import for transactionsProvider
+import '../l10n/app_localizations.dart';
 
 // Provider for VoiceInputService
 final voiceInputServiceProvider = Provider<VoiceInputService>((ref) {
@@ -13,7 +14,10 @@ final voiceInputServiceProvider = Provider<VoiceInputService>((ref) {
 });
 
 class AddTransactionScreen extends ConsumerStatefulWidget {
-  const AddTransactionScreen({Key? key}) : super(key: key);
+  final Transaction? transactionToEdit;
+
+  const AddTransactionScreen({Key? key, this.transactionToEdit})
+    : super(key: key);
 
   @override
   ConsumerState<AddTransactionScreen> createState() =>
@@ -39,6 +43,15 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
     super.initState();
     _voiceService = ref.read(voiceInputServiceProvider);
     _initializeVoiceService();
+
+    // If editing, populate fields with existing transaction data
+    if (widget.transactionToEdit != null) {
+      final transaction = widget.transactionToEdit!;
+      _transactionType = transaction.type;
+      _selectedCategory = transaction.category;
+      _descriptionController.text = transaction.description;
+      _amountController.text = transaction.amount.toStringAsFixed(2);
+    }
   }
 
   Future<void> _initializeVoiceService() async {
@@ -46,8 +59,14 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
     if (!initialized) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Erro ao inicializar entrada por voz'),
+          SnackBar(
+            content: Text(
+              _getErrorMessage(
+                'voice',
+                'Error initializing voice input',
+                'Erro ao inicializar entrada por voz',
+              ),
+            ),
             backgroundColor: AppConstants.alertColor,
           ),
         );
@@ -75,8 +94,14 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
   Future<void> _startListening() async {
     if (!_voiceService.isAvailable) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Serviço de voz não disponível'),
+        SnackBar(
+          content: Text(
+            _getErrorMessage(
+              'voice',
+              'Voice service not available',
+              'Serviço de voz não disponível',
+            ),
+          ),
           backgroundColor: AppConstants.alertColor,
         ),
       );
@@ -101,7 +126,9 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erro na entrada por voz: $error'),
+            content: Text(
+              '${_getErrorMessage('voice', 'Voice input error', 'Erro na entrada por voz')}: $error',
+            ),
             backgroundColor: AppConstants.alertColor,
           ),
         );
@@ -166,6 +193,12 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
     }
   }
 
+  String _getErrorMessage(String field, String english, String portuguese) {
+    return AppLocalizations.of(context)!.localeName == 'pt'
+        ? portuguese
+        : english;
+  }
+
   Future<void> _saveTransaction() async {
     if (!_formKey.currentState!.validate()) {
       return;
@@ -174,45 +207,94 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
     final amount = double.tryParse(_amountController.text.replaceAll(',', '.'));
     if (amount == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Valor inválido'),
+        SnackBar(
+          content: Text(
+            _getErrorMessage('amount', 'Invalid amount', 'Valor inválido'),
+          ),
           backgroundColor: AppConstants.alertColor,
         ),
       );
       return;
     }
 
-    final transaction = Transaction(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      description: _descriptionController.text,
-      amount: amount,
-      type: _transactionType,
-      category: _selectedCategory,
-      date: DateTime.now(),
-      currency: 'BRL',
-    );
+    final transactionService = ref.read(transactionServiceProvider);
 
     try {
-      // Use the notifier to update both database and UI state
-      final notifier = ref.read(transactionsProvider.notifier);
-      await notifier.addTransaction(transaction);
+      if (widget.transactionToEdit != null) {
+        // Update existing transaction
+        print('🔄 Editing transaction: ${widget.transactionToEdit!.id}');
+        print('📝 New description: ${_descriptionController.text}');
+        print('💰 New amount: $amount');
+        print('📊 New type: $_transactionType');
+        print('🏷️ New category: $_selectedCategory');
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '${_transactionType == TransactionType.income ? 'Receita' : 'Despesa'} adicionada com sucesso!',
-            ),
-            backgroundColor: AppConstants.positiveColor,
-          ),
+        final updatedTransaction = widget.transactionToEdit!.copyWith(
+          description: _descriptionController.text,
+          amount: amount,
+          type: _transactionType,
+          category: _selectedCategory,
         );
-        Navigator.of(context).pop();
+
+        print('✅ Updated transaction: ${updatedTransaction.description}');
+
+        await transactionService.updateTransaction(updatedTransaction);
+
+        // Verify the transaction was updated
+        final verifiedTransaction = transactionService.getTransactionById(
+          updatedTransaction.id,
+        );
+        if (verifiedTransaction != null) {
+          print(
+            '🔍 Verified updated transaction: ${verifiedTransaction.description}',
+          );
+        } else {
+          print('❌ Transaction not found after update!');
+        }
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '${_transactionType == TransactionType.income ? AppLocalizations.of(context)!.income : AppLocalizations.of(context)!.expense} ${_getErrorMessage("updated", "updated successfully", "atualizada com sucesso")}!',
+              ),
+              backgroundColor: AppConstants.positiveColor,
+            ),
+          );
+          Navigator.of(context).pop();
+        }
+      } else {
+        // Create new transaction
+        final transaction = Transaction(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          description: _descriptionController.text,
+          amount: amount,
+          type: _transactionType,
+          category: _selectedCategory,
+          date: DateTime.now(),
+          currency: 'BRL',
+        );
+
+        await transactionService.addTransaction(transaction);
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '${_transactionType == TransactionType.income ? AppLocalizations.of(context)!.income : AppLocalizations.of(context)!.expense} ${_getErrorMessage("added", "added successfully", "adicionada com sucesso")}!',
+              ),
+              backgroundColor: AppConstants.positiveColor,
+            ),
+          );
+          Navigator.of(context).pop();
+        }
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erro ao salvar: $e'),
+            content: Text(
+              '${_getErrorMessage('save', 'Error saving', 'Erro ao salvar')}: $e',
+            ),
             backgroundColor: AppConstants.alertColor,
           ),
         );
@@ -222,14 +304,21 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+
     return Scaffold(
+      backgroundColor: const Color(0xFF122118),
       appBar: AppBar(
-        title: const Text('Adicionar Transação'),
+        title: Text(
+          widget.transactionToEdit != null ? l10n.edit : l10n.addTransaction,
+        ),
+        backgroundColor: const Color(0xFF122118),
+        foregroundColor: Colors.white,
         actions: [
           IconButton(
             icon: Icon(_isVoiceMode ? Icons.keyboard : Icons.mic),
             onPressed: _toggleVoiceMode,
-            tooltip: _isVoiceMode ? 'Modo manual' : 'Modo voz',
+            tooltip: _isVoiceMode ? l10n.cancel : l10n.voiceInput,
           ),
         ],
       ),
@@ -258,10 +347,11 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          _isListening ? 'Ouvindo...' : 'Toque para falar',
+                          _isListening ? 'Listening...' : l10n.tapToSpeak,
                           style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
+                            color: Colors.white,
                           ),
                         ),
                         const SizedBox(height: 16),
@@ -274,7 +364,10 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                             ),
                             child: Text(
                               _voiceText,
-                              style: const TextStyle(fontSize: 16),
+                              style: const TextStyle(
+                                fontSize: 16,
+                                color: Colors.black,
+                              ),
                               textAlign: TextAlign.center,
                             ),
                           ),
@@ -284,7 +377,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                               ? _stopListening
                               : _startListening,
                           icon: Icon(_isListening ? Icons.stop : Icons.mic),
-                          label: Text(_isListening ? 'Parar' : 'Começar'),
+                          label: Text(_isListening ? l10n.close : l10n.test),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: _isListening
                                 ? AppConstants.alertColor
@@ -296,9 +389,11 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                           ),
                         ),
                         const SizedBox(height: 8),
-                        const Text(
-                          'Exemplos: "20 mercado" ou "30 44 transporte"',
-                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        Text(
+                          l10n.localeName == 'pt'
+                              ? 'Exemplos: "20 mercado" ou "30 44 transporte"'
+                              : 'Examples: "20 groceries" or "30 44 transportation"',
+                          style: TextStyle(fontSize: 12, color: Colors.white70),
                           textAlign: TextAlign.center,
                         ),
                       ],
@@ -320,24 +415,25 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       // Transaction type selector
-                      const Text(
+                      Text(
                         'Tipo',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
+                          color: Colors.white,
                         ),
                       ),
                       const SizedBox(height: 8),
                       SegmentedButton<TransactionType>(
-                        segments: const [
+                        segments: [
                           ButtonSegment(
                             value: TransactionType.expense,
-                            label: Text('Despesa'),
+                            label: Text(l10n.expense),
                             icon: Icon(Icons.arrow_downward),
                           ),
                           ButtonSegment(
                             value: TransactionType.income,
-                            label: Text('Receita'),
+                            label: Text(l10n.income),
                             icon: Icon(Icons.arrow_upward),
                           ),
                         ],
@@ -354,19 +450,26 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                       // Amount field
                       TextFormField(
                         controller: _amountController,
-                        decoration: const InputDecoration(
-                          labelText: 'Valor',
+                        decoration: InputDecoration(
+                          labelText: l10n.amount,
+                          labelStyle: TextStyle(color: Colors.white),
                           prefixText: 'R\$ ',
+                          prefixStyle: TextStyle(color: Colors.white),
                           border: OutlineInputBorder(),
                         ),
+                        style: const TextStyle(color: Colors.white),
                         keyboardType: TextInputType.number,
                         validator: (value) {
                           if (value == null || value.isEmpty) {
-                            return 'Por favor, insira um valor';
+                            return l10n.amount.isEmpty
+                                ? 'Please enter an amount'
+                                : 'Por favor, insira um valor';
                           }
                           if (double.tryParse(value.replaceAll(',', '.')) ==
                               null) {
-                            return 'Valor inválido';
+                            return l10n.amount.isEmpty
+                                ? 'Invalid amount'
+                                : 'Valor inválido';
                           }
                           return null;
                         },
@@ -377,13 +480,17 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                       // Description field
                       TextFormField(
                         controller: _descriptionController,
-                        decoration: const InputDecoration(
-                          labelText: 'Descrição',
+                        decoration: InputDecoration(
+                          labelText: l10n.description,
+                          labelStyle: TextStyle(color: Colors.white),
                           border: OutlineInputBorder(),
                         ),
+                        style: TextStyle(color: Colors.white),
                         validator: (value) {
                           if (value == null || value.isEmpty) {
-                            return 'Por favor, insira uma descrição';
+                            return l10n.description.isEmpty
+                                ? 'Please enter a description'
+                                : 'Por favor, insira uma descrição';
                           }
                           return null;
                         },
@@ -392,23 +499,30 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                       const SizedBox(height: 16),
 
                       // Category selector
-                      const Text(
-                        'Categoria',
+                      Text(
+                        l10n.category,
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
+                          color: Colors.white,
                         ),
                       ),
                       const SizedBox(height: 8),
                       DropdownButtonFormField<TransactionCategory>(
                         value: _selectedCategory,
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           border: OutlineInputBorder(),
+                          labelStyle: TextStyle(color: Colors.white),
                         ),
+                        style: TextStyle(color: Colors.white),
+                        dropdownColor: const Color(0xFF122118),
                         items: _getAvailableCategories().map((category) {
                           return DropdownMenuItem(
                             value: category,
-                            child: Text(_getCategoryDisplayName(category)),
+                            child: Text(
+                              _getCategoryDisplayName(category),
+                              style: TextStyle(color: Colors.white),
+                            ),
                           );
                         }).toList(),
                         onChanged: (value) {
@@ -438,8 +552,8 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  child: const Text(
-                    'Salvar Transação',
+                  child: Text(
+                    l10n.save,
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                 ),

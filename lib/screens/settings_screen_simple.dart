@@ -13,9 +13,10 @@ class SettingsScreen extends ConsumerWidget {
     final subscriptionService = ref.watch(subscriptionServiceProvider);
 
     return Scaffold(
+      backgroundColor: const Color(0xFF122118),
       appBar: AppBar(
         title: const Text('Configurações'),
-        backgroundColor: AppConstants.primaryColor,
+        backgroundColor: const Color(0xFF122118),
         foregroundColor: Colors.white,
       ),
       body: ListView(
@@ -287,24 +288,53 @@ class SettingsScreen extends ConsumerWidget {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Tutorial de Voz'),
-        content: const Column(
+        backgroundColor: const Color(0xFF38E07B),
+        title: Text(
+          'Tutorial de Voz',
+          style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+        ),
+        content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Exemplos de comandos de voz:'),
-            SizedBox(height: 16),
-            Text('• "20 mercado" → R\$20,00 em Mercado'),
-            Text('• "30 44 transporte" → R\$30,44 em Transporte'),
-            Text('• "50 lazer" → R\$50,00 em Lazer'),
-            SizedBox(height: 16),
-            Text('Diga o valor seguido da categoria.'),
+            Text(
+              'Exemplos de comandos de voz:',
+              style: TextStyle(color: Colors.black),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              '• "20 mercado" → R\$20,00 em Mercado',
+              style: TextStyle(color: Colors.black),
+            ),
+            Text(
+              '• "30 44 transporte" → R\$30,44 em Transporte',
+              style: TextStyle(color: Colors.black),
+            ),
+            Text(
+              '• "50 lazer" → R\$50,00 em Lazer',
+              style: TextStyle(color: Colors.black),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Diga o valor seguido da categoria.',
+              style: TextStyle(color: Colors.black),
+            ),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Entendi'),
+            child: Text(
+              'Entendi',
+              style: TextStyle(
+                color: Colors.black,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            style: TextButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.black,
+            ),
           ),
         ],
       ),

@@ -73,7 +73,21 @@ class TransactionService {
 
   // Update a transaction
   Future<void> updateTransaction(Transaction transaction) async {
+    print('🔄 TransactionService: Updating transaction ${transaction.id}');
+    print('📝 New description: ${transaction.description}');
+    print('💰 New amount: ${transaction.amount}');
+    print('📊 New type: ${transaction.type}');
+    print('🏷️ New category: ${transaction.category}');
+
     await _transactionBox.put(transaction.id, transaction);
+
+    // Verify the update
+    final updated = _transactionBox.get(transaction.id);
+    if (updated != null) {
+      print('✅ TransactionService: Update successful - ${updated.description}');
+    } else {
+      print('❌ TransactionService: Update failed - transaction not found');
+    }
   }
 
   // Delete a transaction

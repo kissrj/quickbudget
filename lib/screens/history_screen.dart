@@ -6,6 +6,8 @@ import 'home_screen.dart'; // Import for transactionsProvider
 import '../main.dart';
 import '../services/pdf_service.dart';
 import '../services/subscription_service.dart';
+import 'add_transaction_screen.dart';
+import '../l10n/app_localizations.dart';
 
 class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({Key? key}) : super(key: key);
@@ -55,15 +57,19 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final transactions = ref.watch(transactionsProvider);
-    final notifier = ref.read(transactionsProvider.notifier);
+    final transactionService = ref.watch(transactionServiceProvider);
     final subscriptionService = ref.watch(subscriptionServiceProvider);
     final pdfService = ref.watch(pdfServiceProvider);
-    final filteredTransactions = _filterTransactions(transactions);
+    final filteredTransactions = _filterTransactions(
+      transactionService.getAllTransactions(),
+    );
 
     return Scaffold(
+      backgroundColor: const Color(0xFF122118),
       appBar: AppBar(
-        title: const Text('Histórico'),
+        title: Text(AppLocalizations.of(context)!.history),
+        backgroundColor: const Color(0xFF122118),
+        foregroundColor: Colors.white,
         actions: [
           if (subscriptionService.isPremium)
             IconButton(
@@ -124,7 +130,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                       const SizedBox(width: 16),
                       Expanded(
                         child: SegmentedButton<TransactionType?>(
-                          segments: const [
+                          segments: [
                             ButtonSegment(value: null, label: Text('Todos')),
                             ButtonSegment(
                               value: TransactionType.income,
@@ -201,6 +207,15 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                           _searchQuery = '';
                         });
                       },
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(
+                          0xFF38E07B,
+                        ), // Verde brilhante igual ao primaryColor
+                        side: const BorderSide(
+                          color: Color(0xFF38E07B),
+                          width: 2,
+                        ),
+                      ),
                       child: const Text('Limpar Filtros'),
                     ),
                   ),
@@ -250,7 +265,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                         Icon(Icons.search_off, size: 64, color: Colors.grey),
                         const SizedBox(height: 16),
                         Text(
-                          transactions.isEmpty
+                          transactionService.getAllTransactions().isEmpty
                               ? 'Nenhuma transação encontrada'
                               : 'Nenhuma transação corresponde aos filtros',
                           style: const TextStyle(
@@ -306,7 +321,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                           );
                         },
                         onDismissed: (direction) {
-                          notifier.deleteTransaction(transaction.id);
+                          transactionService.deleteTransaction(transaction.id);
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                               content: Text(
@@ -315,7 +330,9 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                               action: SnackBarAction(
                                 label: 'Desfazer',
                                 onPressed: () {
-                                  notifier.addTransaction(transaction);
+                                  transactionService.addTransaction(
+                                    transaction,
+                                  );
                                 },
                               ),
                             ),
@@ -330,12 +347,15 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
+                          color: const Color(
+                            0xFF38E07B,
+                          ), // Verde brilhante igual ao botão do microfone
                           child: ListTile(
                             leading: CircleAvatar(
                               backgroundColor:
                                   transaction.type == TransactionType.income
-                                  ? AppConstants.positiveColor.withOpacity(0.1)
-                                  : AppConstants.expenseColor.withOpacity(0.1),
+                                  ? Colors.white.withOpacity(0.9)
+                                  : Colors.white.withOpacity(0.7),
                               child: Icon(
                                 transaction.type == TransactionType.income
                                     ? Icons.arrow_upward
@@ -350,9 +370,16 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                               transaction.description,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.black,
+                                fontWeight: FontWeight.bold,
+                              ), // Texto preto para melhor legibilidade
                             ),
                             subtitle: Text(
                               '${transaction.categoryDisplayName} • ${_formatDate(transaction.date)}',
+                              style: const TextStyle(
+                                color: Colors.black87,
+                              ), // Texto preto escuro
                             ),
                             trailing: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
@@ -373,13 +400,13 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                                   transaction.typeDisplayName,
                                   style: const TextStyle(
                                     fontSize: 12,
-                                    color: Colors.grey,
+                                    color: Colors.black54, // Preto mais suave
                                   ),
                                 ),
                               ],
                             ),
                             onTap: () {
-                              // TODO: Show transaction details
+                              _editTransaction(transaction);
                             },
                           ),
                         ),
@@ -390,6 +417,25 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         ],
       ),
     );
+  }
+
+  void _editTransaction(Transaction transaction) {
+    print(
+      '🔄 HistoryScreen: Editing transaction ${transaction.id} - ${transaction.description}',
+    );
+    // Navigate to add transaction screen with edit mode
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute(
+            builder: (context) =>
+                AddTransactionScreen(transactionToEdit: transaction),
+          ),
+        )
+        .then((_) {
+          // Refresh the list after returning from edit screen
+          print('🔄 HistoryScreen: Returned from edit screen, refreshing list');
+          setState(() {});
+        });
   }
 
   double _calculateTotal(List<Transaction> transactions) {

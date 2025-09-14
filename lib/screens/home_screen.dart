@@ -1,396 +1,409 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../models/transaction.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/constants.dart';
-import '../services/transaction_service.dart';
-import 'add_transaction_screen.dart';
-import 'history_screen.dart';
-import '../main.dart'; // Import for transactionServiceProvider
-import '../widgets/charts_widget.dart';
 import '../widgets/upgrade_prompt_widget.dart';
-import '../services/subscription_service.dart';
-import '../services/ads_service.dart';
+import 'add_transaction_screen.dart';
+import '../main.dart'; // Import for providers
+import '../l10n/app_localizations.dart';
+import '../services/voice_input_service.dart';
+import '../models/transaction.dart';
 
-// Provider for transactions list
-final transactionsProvider =
-    StateNotifierProvider<TransactionsNotifier, List<Transaction>>((ref) {
-      final service = ref.watch(transactionServiceProvider);
-      return TransactionsNotifier(service);
-    });
-
-class TransactionsNotifier extends StateNotifier<List<Transaction>> {
-  final TransactionService _service;
-
-  TransactionsNotifier(this._service) : super([]) {
-    _loadTransactions();
-  }
-
-  Future<void> _loadTransactions() async {
-    state = _service.getAllTransactions();
-  }
-
-  Future<void> addTransaction(Transaction transaction) async {
-    await _service.addTransaction(transaction);
-    // Reload all transactions from database to ensure consistency
-    state = _service.getAllTransactions();
-  }
-
-  Future<void> updateTransaction(Transaction transaction) async {
-    await _service.updateTransaction(transaction);
-    state = state.map((t) => t.id == transaction.id ? transaction : t).toList();
-  }
-
-  Future<void> deleteTransaction(String id) async {
-    await _service.deleteTransaction(id);
-    // Reload all transactions from database to ensure consistency
-    state = _service.getAllTransactions();
-  }
-
-  double get balance => _service.getBalance();
-  double get totalIncome => _service.getTotalIncome();
-  double get totalExpenses => _service.getTotalExpenses();
-}
-
-class HomeScreen extends ConsumerWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final transactions = ref.watch(transactionsProvider);
-    final notifier = ref.read(transactionsProvider.notifier);
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  late VoiceInputService _voiceService;
+  bool _isListening = false;
+  String _voiceStatus = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeVoiceService();
+  }
+
+  Future<void> _initializeVoiceService() async {
+    _voiceService = VoiceInputService();
+
+    // Set up callbacks
+    _voiceService.onResult = _onVoiceResult;
+    _voiceService.onError = _onVoiceError;
+    _voiceService.onListeningChanged = _onListeningChanged;
+    _voiceService.onParsedResult = _onParsedResult;
+
+    await _voiceService.initialize();
+  }
+
+  void _onVoiceResult(String result) {
+    print('Voice result: $result');
+    setState(() {
+      _voiceStatus = result;
+    });
+    // Note: Parsing is now handled in VoiceInputService and will call _onParsedResult
+  }
+
+  void _onParsedResult(VoiceParseResult parseResult) {
+    print('✅ Parsed voice result successfully: $parseResult');
+    _createTransactionFromVoice(parseResult);
+  }
+
+  void _onVoiceError(String error) {
+    print('Voice error: $error');
+    setState(() {
+      _isListening = false;
+      _voiceStatus = '';
+    });
+
+    // Handle specific error cases
+    if (error == 'COULD_NOT_UNDERSTAND') {
+      // Show "could not understand" message only once per session
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppLocalizations.of(context)?.language == 'pt'
+                ? 'Não consegui entender. Tente: "20 mercado"'
+                : 'Could not understand. Try: "20 groceries"',
+          ),
+          backgroundColor: AppConstants.alertColor,
+        ),
+      );
+      return;
+    }
+
+    // Only show other error messages
+    if (error != 'COULD_NOT_UNDERSTAND') {
+      String errorMessage;
+      if (error == 'error_speech_timeout') {
+        errorMessage = AppLocalizations.of(context)?.language == 'pt'
+            ? 'Tempo esgotado. Tente falar mais alto ou mais próximo ao microfone.'
+            : 'Timeout. Try speaking louder or closer to the microphone.';
+      } else {
+        errorMessage = AppLocalizations.of(context)?.language == 'pt'
+            ? 'Erro no reconhecimento de voz: $error'
+            : 'Voice recognition error: $error';
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(errorMessage),
+          backgroundColor: AppConstants.alertColor,
+        ),
+      );
+    }
+  }
+
+  void _onListeningChanged(bool isListening) {
+    print('HomeScreen: Listening state changed to: $isListening');
+    setState(() {
+      _isListening = isListening;
+      if (!isListening) {
+        _voiceStatus = '';
+      }
+    });
+  }
+
+  Future<void> _createTransactionFromVoice(VoiceParseResult parseResult) async {
+    print('🎯 Creating transaction from voice: $parseResult');
+
+    final transactionService = ref.read(transactionServiceProvider);
+
+    // Get current currency from SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    final currency = prefs.getString('currency') ?? 'BRL';
+
+    final transaction = Transaction(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      amount: parseResult.amount,
+      type: TransactionType.expense, // Default to expense for voice input
+      category: parseResult.category,
+      description: parseResult.originalInput,
+      date: DateTime.now(),
+      currency: currency,
+    );
+
+    try {
+      await transactionService.addTransaction(transaction);
+      print('✅ Transaction successfully created: ${transaction.description}');
+
+      // Always show success message when transaction is created
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              AppLocalizations.of(context)?.language == 'pt'
+                  ? '✅ Transação adicionada: R\$ ${parseResult.amount.toStringAsFixed(2)}'
+                  : '✅ Transaction added: \$${parseResult.amount.toStringAsFixed(2)}',
+            ),
+            backgroundColor: AppConstants.positiveColor,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      print('❌ Error creating transaction: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao criar transação: $e'),
+            backgroundColor: AppConstants.alertColor,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _startVoiceListening() async {
+    // Add haptic feedback
+    HapticFeedback.mediumImpact();
+
+    print(
+      'HomeScreen: Voice button tapped, current listening state: $_isListening',
+    );
+
+    if (!_voiceService.isAvailable) {
+      print('HomeScreen: Voice service not available');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppLocalizations.of(context)?.language == 'pt'
+                ? 'Serviço de voz não disponível'
+                : 'Voice service not available',
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (_isListening) {
+      // If already listening, stop listening
+      print('HomeScreen: Already listening, stopping...');
+      await _voiceService.stopListening();
+    } else {
+      // Start listening
+      print('HomeScreen: Starting voice listening...');
+      await _voiceService.startListening();
+    }
+  }
+
+  @override
+  void dispose() {
+    _voiceService.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final transactionService = ref.watch(transactionServiceProvider);
     final subscriptionService = ref.watch(subscriptionServiceProvider);
-    final adsService = ref.watch(adsServiceProvider);
+
+    final totalIncome = transactionService.getTotalIncome();
+    final totalExpenses = transactionService.getTotalExpenses();
+    final balance = transactionService.getBalance();
+    final transactionCount = transactionService.getTransactionCount();
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text(AppConstants.appName),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: () {
-              // TODO: Navigate to settings
-            },
-          ),
-        ],
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
+      backgroundColor: const Color(0xFF122118),
+      body: SafeArea(
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Balance Card
-            Card(
-              elevation: 4,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(20.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Saldo Atual',
-                      style: TextStyle(fontSize: 16, color: Colors.grey),
+            // Header
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const SizedBox(width: 40), // Spacer for center alignment
+                  Text(
+                    AppLocalizations.of(context)?.appName ??
+                        AppConstants.appName,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: AppConstants.textColor,
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'R\$ ${notifier.balance.toStringAsFixed(2)}',
-                      style: TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                        color: notifier.balance >= 0
-                            ? AppConstants.positiveColor
-                            : AppConstants.alertColor,
+                  ),
+                  const SizedBox(width: 40), // Spacer for center alignment
+                ],
+              ),
+            ),
+
+            // Main Content
+            Expanded(
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    // Large Circular Microphone Button
+                    GestureDetector(
+                      onTap: _startVoiceListening,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        width: _isListening
+                            ? 200
+                            : 192, // Slightly larger when listening
+                        height: _isListening ? 200 : 192,
+                        decoration: BoxDecoration(
+                          color: _isListening
+                              ? AppConstants.alertColor
+                              : AppConstants.primaryColor,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color:
+                                  (_isListening
+                                          ? AppConstants.alertColor
+                                          : AppConstants.primaryColor)
+                                      .withOpacity(0.4),
+                              blurRadius: _isListening ? 25 : 20,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          _isListening ? Icons.mic_off : Icons.mic,
+                          size: _isListening
+                              ? 100
+                              : 96, // Slightly larger icon when listening
+                          color: AppConstants.backgroundColor,
+                        ),
                       ),
                     ),
+
+                    const SizedBox(height: 32),
+
+                    // Instruction Text
+                    Text(
+                      _isListening
+                          ? (AppLocalizations.of(context)?.language == 'pt'
+                                ? 'Ouvindo... Fale agora'
+                                : 'Listening... Speak now')
+                          : (AppLocalizations.of(context)?.tapToSpeak ??
+                                'Toque para falar'),
+                      style: TextStyle(
+                        fontSize: 18,
+                        color: _isListening
+                            ? AppConstants.alertColor
+                            : AppConstants.textSecondary,
+                        fontWeight: _isListening
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                      ),
+                    ),
+
+                    const SizedBox(height: 48),
+
+                    // Balance Display (if there are transactions)
+                    if (transactionCount > 0) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 16,
+                        ),
+                        margin: const EdgeInsets.symmetric(horizontal: 32),
+                        decoration: BoxDecoration(
+                          color: AppConstants.secondaryBackground,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: AppConstants.borderColor,
+                            width: 1,
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            Text(
+                              AppLocalizations.of(context)?.currentBalance ??
+                                  'Saldo Atual',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: AppConstants.textSecondary,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'R\$ ${balance.toStringAsFixed(2)}',
+                              style: TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                                color: balance >= 0
+                                    ? AppConstants.primaryColor
+                                    : AppConstants.alertColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+
+                    // Free plan limit warning
+                    if (!subscriptionService.isPremium &&
+                        transactionCount >= AppConstants.freePlanLimit - 2) ...[
+                      const SizedBox(height: 24),
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        margin: const EdgeInsets.symmetric(horizontal: 32),
+                        decoration: BoxDecoration(
+                          color: AppConstants.alertColor.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: AppConstants.alertColor.withOpacity(0.3),
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            Text(
+                              'Limite do plano gratuito',
+                              style: TextStyle(
+                                color: AppConstants.alertColor,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              '${transactionCount}/${AppConstants.freePlanLimit} transações',
+                              style: TextStyle(
+                                color: AppConstants.textSecondary,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            UpgradePromptWidget(
+                              subscriptionService: subscriptionService,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
             ),
 
-            const SizedBox(height: 24),
-
-            // Summary Cards
-            Row(
-              children: [
-                Expanded(
-                  child: Card(
-                    elevation: 2,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+            // Floating Action Button (Add Transaction)
+            Container(
+              padding: const EdgeInsets.only(right: 32, bottom: 32),
+              alignment: Alignment.bottomRight,
+              child: FloatingActionButton(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => const AddTransactionScreen(),
                     ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        children: [
-                          const Icon(
-                            Icons.arrow_upward,
-                            color: AppConstants.positiveColor,
-                          ),
-                          const SizedBox(height: 8),
-                          const Text(
-                            'Receitas',
-                            style: TextStyle(fontSize: 14, color: Colors.grey),
-                          ),
-                          Text(
-                            'R\$ ${notifier.totalIncome.toStringAsFixed(2)}',
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: AppConstants.positiveColor,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Card(
-                    elevation: 2,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        children: [
-                          const Icon(
-                            Icons.arrow_downward,
-                            color: AppConstants.expenseColor,
-                          ),
-                          const SizedBox(height: 8),
-                          const Text(
-                            'Despesas',
-                            style: TextStyle(fontSize: 14, color: Colors.grey),
-                          ),
-                          Text(
-                            'R\$ ${notifier.totalExpenses.toStringAsFixed(2)}',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: AppConstants.expenseColor,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 24),
-
-            // Upgrade Prompt (shown when user reaches limit)
-            UpgradePromptWidget(subscriptionService: subscriptionService),
-
-            const SizedBox(height: 24),
-
-            // Charts Section
-            const ChartsWidget(),
-
-            const SizedBox(height: 24),
-
-            // Recent Transactions
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Transações Recentes',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                TextButton(
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (context) => const HistoryScreen(),
-                      ),
-                    );
-                  },
-                  child: const Text('Ver todas'),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 16),
-
-            // Transaction List
-            Expanded(
-              child: transactions.isEmpty
-                  ? const Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.receipt_long,
-                            size: 64,
-                            color: Colors.grey,
-                          ),
-                          SizedBox(height: 16),
-                          Text(
-                            'Nenhuma transação ainda',
-                            style: TextStyle(fontSize: 18, color: Colors.grey),
-                          ),
-                          SizedBox(height: 8),
-                          Text(
-                            'Toque no botão + para adicionar',
-                            style: TextStyle(fontSize: 14, color: Colors.grey),
-                          ),
-                        ],
-                      ),
-                    )
-                  : ListView.builder(
-                      itemCount: transactions.length > 5
-                          ? 5
-                          : transactions.length,
-                      itemBuilder: (context, index) {
-                        final transaction =
-                            transactions[transactions.length - 1 - index];
-                        return Dismissible(
-                          key: Key(transaction.id),
-                          direction: DismissDirection.endToStart,
-                          background: Container(
-                            alignment: Alignment.centerRight,
-                            padding: const EdgeInsets.only(right: 20),
-                            decoration: BoxDecoration(
-                              color: AppConstants.alertColor,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: const Icon(
-                              Icons.delete,
-                              color: Colors.white,
-                            ),
-                          ),
-                          confirmDismiss: (direction) async {
-                            return await showDialog(
-                              context: context,
-                              builder: (BuildContext context) {
-                                return AlertDialog(
-                                  title: const Text('Confirmar exclusão'),
-                                  content: Text(
-                                    'Deseja excluir a transação "${transaction.description}"?',
-                                  ),
-                                  actions: <Widget>[
-                                    TextButton(
-                                      onPressed: () =>
-                                          Navigator.of(context).pop(false),
-                                      child: const Text('Cancelar'),
-                                    ),
-                                    TextButton(
-                                      onPressed: () =>
-                                          Navigator.of(context).pop(true),
-                                      style: TextButton.styleFrom(
-                                        foregroundColor:
-                                            AppConstants.alertColor,
-                                      ),
-                                      child: const Text('Excluir'),
-                                    ),
-                                  ],
-                                );
-                              },
-                            );
-                          },
-                          onDismissed: (direction) {
-                            notifier.deleteTransaction(transaction.id);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  'Transação "${transaction.description}" excluída',
-                                ),
-                                action: SnackBarAction(
-                                  label: 'Desfazer',
-                                  onPressed: () {
-                                    notifier.addTransaction(transaction);
-                                  },
-                                ),
-                              ),
-                            );
-                          },
-                          child: Card(
-                            elevation: 1,
-                            margin: const EdgeInsets.only(bottom: 8),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: ListTile(
-                              leading: CircleAvatar(
-                                backgroundColor:
-                                    transaction.type == TransactionType.income
-                                    ? AppConstants.positiveColor.withOpacity(
-                                        0.1,
-                                      )
-                                    : AppConstants.expenseColor.withOpacity(
-                                        0.1,
-                                      ),
-                                child: Icon(
-                                  transaction.type == TransactionType.income
-                                      ? Icons.arrow_upward
-                                      : Icons.arrow_downward,
-                                  color:
-                                      transaction.type == TransactionType.income
-                                      ? AppConstants.positiveColor
-                                      : AppConstants.expenseColor,
-                                ),
-                              ),
-                              title: Text(
-                                transaction.description,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              subtitle: Text(
-                                '${transaction.categoryDisplayName} • ${transaction.date.day}/${transaction.date.month}',
-                              ),
-                              trailing: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  Text(
-                                    transaction.formattedAmount,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color:
-                                          transaction.type ==
-                                              TransactionType.income
-                                          ? AppConstants.positiveColor
-                                          : AppConstants.expenseColor,
-                                    ),
-                                  ),
-                                  Text(
-                                    transaction.typeDisplayName,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              onTap: () {
-                                // TODO: Navigate to transaction details/edit
-                              },
-                            ),
-                          ),
-                        );
-                      },
-                    ),
+                  );
+                },
+                backgroundColor: AppConstants.primaryColor,
+                foregroundColor: AppConstants.backgroundColor,
+                elevation: 4,
+                child: const Icon(Icons.paid, size: 32),
+              ),
             ),
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (context) => const AddTransactionScreen(),
-            ),
-          );
-        },
-        backgroundColor: AppConstants.primaryColor,
-        child: const Icon(Icons.add),
-      ),
-      bottomNavigationBar: adsService.getBannerAdWidget(),
     );
   }
 }

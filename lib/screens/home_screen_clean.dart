@@ -62,8 +62,11 @@ class HomeScreen extends ConsumerWidget {
     final adsService = ref.watch(adsServiceProvider);
 
     return Scaffold(
+      backgroundColor: const Color(0xFF122118),
       appBar: AppBar(
         title: const Text(AppConstants.appName),
+        backgroundColor: const Color(0xFF122118),
+        foregroundColor: Colors.white,
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),

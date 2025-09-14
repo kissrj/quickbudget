@@ -1,16 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'models/transaction.dart';
 import 'services/transaction_service.dart';
 import 'services/subscription_service.dart';
 import 'services/ads_service.dart';
 import 'services/pdf_service.dart';
+import 'services/data_export_service.dart';
 import 'screens/main_navigation.dart';
 import 'utils/theme.dart';
 import 'utils/constants.dart';
+import 'l10n/app_localizations.dart';
+import 'providers/theme_provider.dart' as theme_provider;
 
 // Global provider for the initialized TransactionService
 final transactionServiceProvider = Provider<TransactionService>((ref) {
@@ -34,6 +39,13 @@ final adsServiceProvider = Provider<AdsService>((ref) {
 // Global provider for PdfService
 final pdfServiceProvider = Provider<PdfService>((ref) {
   throw UnimplementedError('PdfService must be initialized in main.dart');
+});
+
+// Global provider for DataExportService
+final dataExportServiceProvider = Provider<DataExportService>((ref) {
+  throw UnimplementedError(
+    'DataExportService must be initialized in main.dart',
+  );
 });
 
 void main() async {
@@ -62,6 +74,9 @@ void main() async {
   // Initialize PdfService
   final pdfService = PdfService(subscriptionService);
 
+  // Initialize DataExportService
+  final dataExportService = DataExportService(transactionService);
+
   runApp(
     ProviderScope(
       overrides: [
@@ -69,24 +84,61 @@ void main() async {
         subscriptionServiceProvider.overrideWithValue(subscriptionService),
         adsServiceProvider.overrideWithValue(adsService),
         pdfServiceProvider.overrideWithValue(pdfService),
+        dataExportServiceProvider.overrideWithValue(dataExportService),
       ],
       child: const MyApp(),
     ),
   );
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({Key? key}) : super(key: key);
 
   @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  Locale _locale = const Locale('pt');
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedLanguage();
+  }
+
+  Future<void> _loadSavedLanguage() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedLanguage = prefs.getString('language') ?? 'pt';
+    setState(() {
+      _locale = Locale(savedLanguage);
+    });
+  }
+
+  void _changeLanguage(String languageCode) {
+    setState(() {
+      _locale = Locale(languageCode);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: AppConstants.appName,
-      theme: AppTheme.lightTheme,
-      darkTheme: AppTheme.darkTheme,
-      themeMode: ThemeMode.system,
-      home: const MainNavigation(),
-      debugShowCheckedModeBanner: false,
+    return Consumer(
+      builder: (context, ref, child) {
+        final themeNotifier = ref.watch(theme_provider.themeProvider.notifier);
+        return MaterialApp(
+          title: AppConstants.appName,
+          theme: themeNotifier.getThemeData(),
+          locale: _locale,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: MainNavigation(
+            onLanguageChange: _changeLanguage,
+            currentLocale: _locale,
+          ),
+          debugShowCheckedModeBanner: false,
+        );
+      },
     );
   }
 }
@@ -181,7 +233,8 @@ class _VoiceToTextPageState extends State<VoiceToTextPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        backgroundColor: AppConstants.backgroundColor,
+        foregroundColor: AppConstants.textColor,
         title: Text(widget.title),
       ),
       body: Center(
